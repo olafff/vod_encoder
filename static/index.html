@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VOD Encoder</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --accent:#58a6ff;--accent-dim:#1f6feb;
+  --text:#e6edf3;--muted:#8b949e;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--purple:#a371f7;
+}
+
+body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+
+/* ── header ── */
+header{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  padding:10px 24px;display:flex;align-items:center;gap:12px;
+  position:sticky;top:0;z-index:100
+}
+header h1{font-size:16px;font-weight:700;letter-spacing:-.3px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);
+     animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.refresh-info{margin-left:auto;display:flex;align-items:center;gap:6px;
+              font-size:12px;color:var(--muted)}
+
+/* ── stats ── */
+.stats{display:flex;gap:12px;padding:14px 24px;background:var(--surface);
+       border-bottom:1px solid var(--border);flex-wrap:wrap}
+.stat{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+      padding:8px 20px;min-width:90px}
+.stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.stat-value{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat.s-queue .stat-value{color:var(--accent)}
+.stat.s-proc  .stat-value{color:var(--purple)}
+.stat.s-done  .stat-value{color:var(--green)}
+.stat.s-fail  .stat-value{color:var(--red)}
+
+/* ── main ── */
+.main{max-width:1400px;margin:0 auto;padding:20px 24px}
+
+/* ── toolbar ── */
+.toolbar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.tabs{display:flex;gap:3px;flex:1;flex-wrap:wrap}
+.tab{padding:5px 13px;border-radius:6px;border:1px solid transparent;
+     background:none;color:var(--muted);cursor:pointer;font-size:13px;transition:.12s}
+.tab:hover{background:var(--surface2);color:var(--text)}
+.tab.active{background:var(--accent-dim);border-color:var(--accent);color:#fff}
+
+/* ── buttons ── */
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border);
+     background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;
+     display:inline-flex;align-items:center;gap:5px;white-space:nowrap;transition:.12s}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent-dim);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent)}
+.btn.danger{background:none;border-color:transparent;color:var(--red);padding:3px 8px}
+.btn.danger:hover{background:rgba(248,81,73,.12)}
+
+/* ── table ── */
+.tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+table{width:100%;border-collapse:collapse}
+th{padding:9px 14px;text-align:left;font-size:11px;text-transform:uppercase;
+   letter-spacing:.5px;color:var(--muted);background:var(--surface2);
+   border-bottom:1px solid var(--border);font-weight:600}
+td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.empty{text-align:center;padding:40px;color:var(--muted);font-size:13px}
+
+/* ── workers grid ── */
+.worker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.worker-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+             padding:14px}
+.worker-card.alive{border-left:3px solid var(--green)}
+.worker-card.dead{border-left:3px solid var(--border);opacity:.55}
+.worker-id{font:600 13px/1 'SF Mono','Consolas',monospace;margin-bottom:3px}
+.worker-host{color:var(--muted);font-size:12px;margin-bottom:8px}
+
+/* ── badges ── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;
+       border-radius:20px;font-size:11px;font-weight:600}
+.badge.queue   {background:rgba(88,166,255,.15);color:var(--accent)}
+.badge.proc    {background:rgba(163,113,247,.15);color:var(--purple)}
+.badge.done    {background:rgba(63,185,80,.15);color:var(--green)}
+.badge.fail    {background:rgba(248,81,73,.15);color:var(--red)}
+.badge.alive   {background:rgba(63,185,80,.15);color:var(--green)}
+.badge.dead    {background:rgba(139,148,158,.15);color:var(--muted)}
+.badge.working {background:rgba(163,113,247,.15);color:var(--purple)}
+
+/* ── priority dot ── */
+.prio{display:inline-block;width:22px;height:22px;border-radius:50%;
+      text-align:center;line-height:22px;font-size:11px;font-weight:700}
+.prio.hi{background:rgba(248,81,73,.2);color:var(--red)}
+.prio.md{background:rgba(210,153,34,.2);color:var(--yellow)}
+.prio.lo{background:rgba(139,148,158,.15);color:var(--muted)}
+
+/* ── progress ── */
+.prog-wrap{display:flex;align-items:center;gap:8px}
+.prog-bar{flex:1;height:5px;background:var(--surface2);border-radius:3px;
+          overflow:hidden;min-width:80px}
+.prog-fill{height:100%;background:var(--purple);border-radius:3px;transition:width .4s}
+.prog-pct{font-size:11px;color:var(--muted);width:30px;text-align:right}
+
+/* ── mono cell ── */
+.mono{font:12px 'SF Mono','Consolas',monospace}
+.trunc{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── slide-in panel ── */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200}
+.overlay.open{display:block}
+.panel{position:fixed;top:0;right:0;width:420px;height:100vh;overflow-y:auto;
+       background:var(--surface);border-left:1px solid var(--border);padding:22px;
+       transform:translateX(100%);transition:transform .22s ease;z-index:201}
+.overlay.open .panel{transform:translateX(0)}
+.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.panel-hdr h2{font-size:15px;font-weight:600}
+.x-btn{width:26px;height:26px;border-radius:5px;border:1px solid var(--border);
+       background:none;color:var(--muted);cursor:pointer;font-size:15px;
+       display:flex;align-items:center;justify-content:center}
+.x-btn:hover{background:var(--surface2);color:var(--text)}
+
+/* ── form ── */
+.fg{margin-bottom:14px}
+label{display:block;font-size:11px;font-weight:600;color:var(--muted);
+      text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px}
+input,select,textarea{width:100%;padding:7px 11px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:6px;color:var(--text);
+  font-size:13px;outline:none;transition:border-color .12s;font-family:inherit}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+select option{background:var(--surface2)}
+.hint{font-size:11px;color:var(--muted);margin-top:3px}
+input[type=range]{padding:0;height:18px;accent-color:var(--accent)}
+.range-row{display:flex;justify-content:space-between;font-size:11px;
+           color:var(--muted);margin-top:3px}
+.form-actions{display:flex;gap:8px;margin-top:20px}
+
+/* ── upload area ── */
+.upload-zone{border:2px dashed var(--border);border-radius:9px;padding:28px;
+             text-align:center;cursor:pointer;transition:.15s;color:var(--muted);
+             margin-bottom:14px}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);
+  background:rgba(88,166,255,.05);color:var(--text)}
+.upload-icon{font-size:28px;margin-bottom:6px}
+.upload-item{background:var(--surface2);border:1px solid var(--border);
+             border-radius:7px;padding:11px;margin-bottom:8px}
+.upload-name{font-size:13px;font-weight:600;margin-bottom:2px}
+.upload-size{font-size:11px;color:var(--muted);margin-bottom:7px}
+
+/* ── toast ── */
+#toast{position:fixed;bottom:22px;right:22px;background:var(--surface);
+       border:1px solid var(--border);border-radius:8px;padding:11px 15px;
+       font-size:13px;z-index:999;opacity:0;transform:translateY(6px);
+       transition:.18s;pointer-events:none;max-width:300px}
+#toast.show{opacity:1;transform:translateY(0)}
+#toast.ok{border-left:3px solid var(--green)}
+#toast.err{border-left:3px solid var(--red)}
+
+hr{border:none;border-top:1px solid var(--border);margin:14px 0}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ VOD Encoder</h1>
+  <div class="refresh-info">
+    <div class="dot" id="dot"></div>
+    <span id="refresh-lbl">auto-refresh</span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat s-queue"><div class="stat-label">Queue</div><div class="stat-value" id="sQ">-</div></div>
+  <div class="stat s-proc" ><div class="stat-label">Processing</div><div class="stat-value" id="sP">-</div></div>
+  <div class="stat s-done" ><div class="stat-label">Completed</div><div class="stat-value" id="sD">-</div></div>
+  <div class="stat s-fail" ><div class="stat-label">Failed</div><div class="stat-value" id="sF">-</div></div>
+</div>
+
+<div class="main">
+  <div class="toolbar">
+    <div class="tabs">
+      <button class="tab active" data-tab="queue"      onclick="switchTab(this)">Queue</button>
+      <button class="tab"        data-tab="processing" onclick="switchTab(this)">Processing</button>
+      <button class="tab"        data-tab="completed"  onclick="switchTab(this)">Completed</button>
+      <button class="tab"        data-tab="failed"     onclick="switchTab(this)">Failed</button>
+      <button class="tab"        data-tab="workers"    onclick="switchTab(this)">Workers</button>
+    </div>
+    <button class="btn"         onclick="openUpload()">↑ Upload</button>
+    <button class="btn primary" onclick="openAddJob()">+ Add Job</button>
+  </div>
+
+  <!-- Queue -->
+  <div id="tab-queue" class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>Input File</th><th>Preset</th><th style="text-align:center">Priority</th>
+        <th>Created</th><th>Assign To</th><th></th>
+      </tr></thead>
+      <tbody id="b-queue"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Processing -->
+  <div id="tab-processing" class="tbl-wrap" style="display:none">
+    <table>
+      <thead><tr>
+        <th>Input File</th><th>Preset</th><th>Progress</th><th>Started</th><th>Worker</th>
+      </tr></thead>
+      <tbody id="b-proc"><tr><td colspan="5" class="empty">No active jobs</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Completed -->
+  <div id="tab-completed" class="tbl-wrap" style="display:none">
+    <table>
+      <thead><tr>
+        <th>Input File</th><th>Preset</th><th>Output File</th><th>Completed</th><th>Worker</th>
+      </tr></thead>
+      <tbody id="b-done"><tr><td colspan="5" class="empty">No completed jobs yet</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Failed -->
+  <div id="tab-failed" class="tbl-wrap" style="display:none">
+    <table>
+      <thead><tr>
+        <th>Input File</th><th>Preset</th><th>Error</th><th>Time</th><th></th>
+      </tr></thead>
+      <tbody id="b-fail"><tr><td colspan="5" class="empty">No failed jobs</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Workers -->
+  <div id="tab-workers" style="display:none">
+    <div class="worker-grid" id="worker-grid">
+      <div class="empty" style="grid-column:1/-1">
+        No workers yet — run <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">python worker.py</code> on any machine
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Job panel ── -->
+<div class="overlay" id="ov-job" onclick="closeIf(event,'ov-job')">
+ <div class="panel">
+  <div class="panel-hdr">
+    <h2>Add Encoding Job</h2>
+    <button class="x-btn" onclick="close_('ov-job')">✕</button>
+  </div>
+
+  <div class="fg">
+    <label>Input File</label>
+    <select id="f-file"><option value="">Loading…</option></select>
+    <p class="hint">Files in the <code>input/</code> directory on the server</p>
+  </div>
+
+  <div class="fg">
+    <label>Preset</label>
+    <select id="f-preset" onchange="toggleCustom()"><option value="">Loading…</option></select>
+  </div>
+
+  <div class="fg" id="fg-custom" style="display:none">
+    <label>Custom FFmpeg Args</label>
+    <textarea id="f-custom" rows="3"
+      placeholder="-vf scale=1280:720 -c:v libx264 -crf 23 -c:a aac -b:a 128k"></textarea>
+    <p class="hint">Space-separated — no <code>-i</code> input or output path</p>
+  </div>
+
+  <div class="fg">
+    <label>Output Name <span style="font-weight:400;text-transform:none">(optional)</span></label>
+    <input type="text" id="f-out" placeholder="Auto-generated from input filename">
+  </div>
+
+  <div class="fg">
+    <label>Priority: <span id="prio-val">5</span></label>
+    <input type="range" min="1" max="10" value="5" id="f-prio"
+           oninput="document.getElementById('prio-val').textContent=this.value">
+    <div class="range-row"><span>1 — Low</span><span>10 — High</span></div>
+  </div>
+
+  <div class="fg">
+    <label>Assign to Worker <span style="font-weight:400;text-transform:none">(optional)</span></label>
+    <select id="f-worker"><option value="">Any available worker</option></select>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn primary" onclick="submitJob()" style="flex:1">Add to Queue</button>
+    <button class="btn" onclick="close_('ov-job')">Cancel</button>
+  </div>
+ </div>
+</div>
+
+<!-- ── Upload panel ── -->
+<div class="overlay" id="ov-up" onclick="closeIf(event,'ov-up')">
+ <div class="panel">
+  <div class="panel-hdr">
+    <h2>Upload Video File</h2>
+    <button class="x-btn" onclick="close_('ov-up')">✕</button>
+  </div>
+
+  <div class="upload-zone" id="uz"
+       onclick="document.getElementById('fi').click()"
+       ondragover="dov(event)" ondragleave="dol()" ondrop="dop(event)">
+    <div class="upload-icon">📁</div>
+    <div>Click or drag &amp; drop video files here</div>
+    <div style="font-size:12px;margin-top:4px">Uploads to <code>input/</code> on the server</div>
+  </div>
+  <input type="file" id="fi" style="display:none" accept="video/*,audio/*" multiple
+         onchange="onFiles(this.files)">
+
+  <div id="up-list"></div>
+ </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── state ──────────────────────────────────────────────────────────────────────
+let jobs=[], workers=[], presets={}, activeTab='queue', timer;
+
+// ── tabs ───────────────────────────────────────────────────────────────────────
+function switchTab(btn){
+  activeTab=btn.dataset.tab;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  ['queue','processing','completed','failed','workers'].forEach(t=>{
+    document.getElementById('tab-'+t).style.display=t===activeTab?'':'none';
+  });
+}
+
+// ── fetch ──────────────────────────────────────────────────────────────────────
+async function fetchAll(){
+  try{
+    const [jr,wr]=await Promise.all([fetch('/api/jobs'),fetch('/api/workers')]);
+    jobs=await jr.json(); workers=await wr.json();
+    render();
+    document.getElementById('dot').style.background='var(--green)';
+    document.getElementById('refresh-lbl').textContent='just now';
+  }catch(e){
+    document.getElementById('dot').style.background='var(--red)';
+    document.getElementById('refresh-lbl').textContent='error';
+  }
+}
+
+async function loadPresets(){
+  const r=await fetch('/api/presets');
+  presets=await r.json();
+  const s=document.getElementById('f-preset');
+  s.innerHTML=Object.entries(presets).map(([k,v])=>
+    `<option value="${k}">${k} — ${v.description}</option>`
+  ).join('')+'<option value="custom">Custom (enter ffmpeg args)</option>';
+}
+
+async function loadFiles(){
+  try{
+    const r=await fetch('/api/files');
+    const files=await r.json();
+    const s=document.getElementById('f-file');
+    s.innerHTML=files.length
+      ? files.map(f=>`<option value="input/${f.name}">input/${f.name}${f.size?' ('+fmtSz(f.size)+')':''}</option>`).join('')
+      : '<option value="">No files in input/ — upload one first</option>';
+  }catch(e){}
+}
+
+// ── render ─────────────────────────────────────────────────────────────────────
+function render(){
+  const by={queue:[],processing:[],completed:[],failed:[]};
+  jobs.forEach(j=>{if(by[j.status])by[j.status].push(j);});
+
+  document.getElementById('sQ').textContent=by.queue.length;
+  document.getElementById('sP').textContent=by.processing.length;
+  document.getElementById('sD').textContent=by.completed.length;
+  document.getElementById('sF').textContent=by.failed.length;
+
+  rQueue(by.queue);
+  rProc(by.processing);
+  rDone(by.completed);
+  rFail(by.failed);
+  rWorkers();
+}
+
+function sf(f){return f?(f.replace('input/','').replace('output/','')):'-'}
+function fmtAge(iso){
+  if(!iso)return'-';
+  const s=Math.floor((Date.now()-new Date(iso))/1000);
+  if(s<60)return s+'s ago';
+  if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago';
+  return new Date(iso).toLocaleDateString();
+}
+function fmtSz(b){
+  if(!b)return'';
+  if(b>1e9)return(b/1e9).toFixed(1)+' GB';
+  if(b>1e6)return Math.round(b/1e6)+' MB';
+  return Math.round(b/1e3)+' KB';
+}
+function prioHtml(p){
+  const c=p>=8?'hi':p>=5?'md':'lo';
+  return`<span class="prio ${c}">${p}</span>`;
+}
+function wid(id){return id?`<span class="mono">${id.slice(0,8)}</span>`:'-'}
+
+function rQueue(list){
+  const b=document.getElementById('b-queue');
+  if(!list.length){b.innerHTML='<tr><td colspan="6" class="empty">Queue is empty</td></tr>';return;}
+  const s=[...list].sort((a,b)=>(b.priority||5)-(a.priority||5));
+  b.innerHTML=s.map(j=>`<tr>
+    <td><div class="mono trunc" title="${j.input_file}">${sf(j.input_file)}</div></td>
+    <td><code>${j.preset}</code></td>
+    <td style="text-align:center">${prioHtml(j.priority||5)}</td>
+    <td style="color:var(--muted);font-size:12px">${fmtAge(j.created_at)}</td>
+    <td>${j.assigned_to?wid(j.assigned_to):'<span style="color:var(--muted)">Any</span>'}</td>
+    <td><button class="btn danger" onclick="del('${j.id}')">✕</button></td>
+  </tr>`).join('');
+}
+
+function rProc(list){
+  const b=document.getElementById('b-proc');
+  if(!list.length){b.innerHTML='<tr><td colspan="5" class="empty">No jobs being processed</td></tr>';return;}
+  b.innerHTML=list.map(j=>`<tr>
+    <td><div class="mono trunc" title="${j.input_file}">${sf(j.input_file)}</div></td>
+    <td><code>${j.preset}</code></td>
+    <td>
+      <div class="prog-wrap">
+        <div class="prog-bar"><div class="prog-fill" style="width:${j.progress||0}%"></div></div>
+        <div class="prog-pct">${j.progress||0}%</div>
+      </div>
+    </td>
+    <td style="color:var(--muted);font-size:12px">${fmtAge(j.started_at)}</td>
+    <td>${wid(j.worker_id)}</td>
+  </tr>`).join('');
+}
+
+function rDone(list){
+  const b=document.getElementById('b-done');
+  if(!list.length){b.innerHTML='<tr><td colspan="5" class="empty">No completed jobs</td></tr>';return;}
+  const s=[...list].sort((a,c)=>new Date(c.completed_at)-new Date(a.completed_at));
+  b.innerHTML=s.map(j=>`<tr>
+    <td><div class="mono trunc" title="${j.input_file}">${sf(j.input_file)}</div></td>
+    <td><code>${j.preset}</code></td>
+    <td><div class="mono trunc" title="${j.output_file||''}">${sf(j.output_file)}</div></td>
+    <td style="color:var(--muted);font-size:12px">${fmtAge(j.completed_at)}</td>
+    <td>${wid(j.worker_id)}</td>
+  </tr>`).join('');
+}
+
+function rFail(list){
+  const b=document.getElementById('b-fail');
+  if(!list.length){b.innerHTML='<tr><td colspan="5" class="empty">No failed jobs</td></tr>';return;}
+  b.innerHTML=list.map(j=>`<tr>
+    <td><div class="mono trunc" title="${j.input_file}">${sf(j.input_file)}</div></td>
+    <td><code>${j.preset}</code></td>
+    <td><div class="trunc" style="color:var(--red);font-size:12px" title="${j.error||''}">${j.error||'Unknown error'}</div></td>
+    <td style="color:var(--muted);font-size:12px">${fmtAge(j.completed_at)}</td>
+    <td><button class="btn danger" onclick="del('${j.id}')">✕</button></td>
+  </tr>`).join('');
+}
+
+function rWorkers(){
+  const g=document.getElementById('worker-grid');
+
+  // update assign-to dropdown
+  const sel=document.getElementById('f-worker');
+  const cur=sel.value;
+  const alive=workers.filter(w=>w.alive);
+  sel.innerHTML='<option value="">Any available worker</option>'+
+    alive.map(w=>`<option value="${w.id}">${w.id.slice(0,8)} — ${w.hostname||'?'}</option>`).join('');
+  if(cur)sel.value=cur;
+
+  if(!workers.length){
+    g.innerHTML='<div class="empty" style="grid-column:1/-1">No workers registered — run <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">python worker.py</code> on any machine</div>';
+    return;
+  }
+  g.innerHTML=workers.map(w=>`
+    <div class="worker-card ${w.alive?'alive':'dead'}">
+      <div class="worker-id">${w.id.slice(0,8)}</div>
+      <div class="worker-host">🖥 ${w.hostname||'Unknown'}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <span class="badge ${w.alive?'alive':'dead'}">${w.alive?'● Online':'○ Offline'}</span>
+        ${w.current_job?'<span class="badge working">Working</span>':''}
+      </div>
+      ${w.current_job?`<div style="margin-top:7px;font-size:12px;color:var(--muted)">Job: <code>${w.current_job.slice(0,8)}</code></div>`:''}
+      <div style="margin-top:7px;font-size:11px;color:var(--muted)">Last seen: ${fmtAge(w.last_heartbeat)}</div>
+      ${w.capabilities?.presets?`<div style="margin-top:3px;font-size:11px;color:var(--muted)">Presets: ${w.capabilities.presets.join(', ')}</div>`:''}
+    </div>`).join('');
+}
+
+// ── actions ────────────────────────────────────────────────────────────────────
+async function del(id){
+  if(!confirm('Delete this job?'))return;
+  const r=await fetch('/api/jobs/'+id,{method:'DELETE'});
+  if(r.ok){toast('Job deleted','ok');fetchAll();}
+  else{const e=await r.json();toast(e.detail||'Delete failed','err');}
+}
+
+function toggleCustom(){
+  const v=document.getElementById('f-preset').value;
+  document.getElementById('fg-custom').style.display=v==='custom'?'':'none';
+}
+
+async function submitJob(){
+  const file=document.getElementById('f-file').value;
+  const preset=document.getElementById('f-preset').value;
+  const outName=document.getElementById('f-out').value.trim();
+  const prio=+document.getElementById('f-prio').value;
+  const wk=document.getElementById('f-worker').value;
+  const ca=document.getElementById('f-custom').value.trim();
+
+  if(!file){toast('Select an input file','err');return;}
+  if(!preset){toast('Select a preset','err');return;}
+  if(preset==='custom'&&!ca){toast('Enter custom ffmpeg arguments','err');return;}
+
+  const body={
+    input_file:file,
+    preset:preset==='custom'?'custom':preset,
+    priority:prio,
+    custom_args:preset==='custom'?ca.split(/\s+/).filter(Boolean):null,
+    output_name:outName||undefined,
+    assigned_to:wk||undefined,
+  };
+
+  const r=await fetch('/api/jobs',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){toast('Job queued!','ok');close_('ov-job');fetchAll();}
+  else{const e=await r.json();toast(e.detail||'Error','err');}
+}
+
+// ── panels ─────────────────────────────────────────────────────────────────────
+function openAddJob(){loadFiles();document.getElementById('ov-job').classList.add('open')}
+function openUpload(){document.getElementById('ov-up').classList.add('open')}
+function close_(id){document.getElementById(id).classList.remove('open')}
+function closeIf(e,id){if(e.target.classList.contains('overlay'))close_(id)}
+
+// ── drag & drop upload ─────────────────────────────────────────────────────────
+function dov(e){e.preventDefault();document.getElementById('uz').classList.add('drag')}
+function dol(){document.getElementById('uz').classList.remove('drag')}
+function dop(e){e.preventDefault();dol();onFiles(e.dataTransfer.files)}
+function onFiles(fs){[...fs].forEach(uploadFile)}
+
+function uploadFile(file){
+  const id='u'+Date.now()+Math.random().toString(36).slice(2);
+  const list=document.getElementById('up-list');
+  const el=document.createElement('div');
+  el.className='upload-item';
+  el.innerHTML=`
+    <div class="upload-name">${file.name}</div>
+    <div class="upload-size">${fmtSz(file.size)}</div>
+    <div class="prog-bar" style="height:4px">
+      <div class="prog-fill" id="${id}-b" style="width:0%"></div>
+    </div>
+    <div style="font-size:11px;margin-top:4px;color:var(--muted)" id="${id}-s">Uploading…</div>`;
+  list.prepend(el);
+
+  const fd=new FormData(); fd.append('file',file);
+  const xhr=new XMLHttpRequest();
+  xhr.open('POST','/api/upload');
+  xhr.upload.onprogress=e=>{
+    if(e.lengthComputable){
+      const p=Math.round(e.loaded/e.total*100);
+      document.getElementById(id+'-b').style.width=p+'%';
+    }
+  };
+  xhr.onload=()=>{
+    const bar=document.getElementById(id+'-b');
+    const lbl=document.getElementById(id+'-s');
+    if(xhr.status===200){
+      bar.style.width='100%';bar.style.background='var(--green)';
+      lbl.textContent='Upload complete';lbl.style.color='var(--green)';
+      loadFiles();
+    }else{
+      lbl.textContent='Failed: '+xhr.responseText;lbl.style.color='var(--red)';
+    }
+  };
+  xhr.onerror=()=>{
+    document.getElementById(id+'-s').textContent='Network error';
+    document.getElementById(id+'-s').style.color='var(--red)';
+  };
+  xhr.send(fd);
+}
+
+// ── toast ──────────────────────────────────────────────────────────────────────
+function toast(msg,type='ok'){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.className='show '+type;
+  clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),3000);
+}
+
+// ── boot ───────────────────────────────────────────────────────────────────────
+fetchAll();
+loadPresets();
+timer=setInterval(fetchAll,5000);
+</script>
+</body>
+</html>
