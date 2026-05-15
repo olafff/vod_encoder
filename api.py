@@ -56,6 +56,10 @@ def add_job(body: JobIn):
     if body.preset not in config.PRESETS and body.preset != "custom" and not body.custom_args:
         raise HTTPException(400, f"Unknown preset '{body.preset}'. "
                                  f"Available: {list(config.PRESETS.keys())} or 'custom'")
+    existing = job_manager.list_jobs()
+    for j in existing:
+        if j.get("input_file") == body.input_file and j.get("status") in ("queue", "processing", "completed"):
+            raise HTTPException(409, f"A job for this input file already exists (id={j['id']}, status={j['status']})")
     return job_manager.create_job(
         input_file=body.input_file,
         preset=body.preset,

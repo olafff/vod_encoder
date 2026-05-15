@@ -17,6 +17,8 @@ import time
 import uuid
 from pathlib import Path
 
+import psutil
+
 import config
 import job_manager
 import encoder
@@ -54,12 +56,18 @@ def _upload(sftp, local: str, remote: str):
 
 
 def _heartbeat_loop():
+    psutil.cpu_percent()  # prime the counter; first call always returns 0.0
     while True:
+        time.sleep(config.HEARTBEAT_INTERVAL)
         try:
-            job_manager.heartbeat(WORKER_ID)
+            stats = {
+                "cpu_percent": psutil.cpu_percent(),
+                "mem_percent": psutil.virtual_memory().percent,
+                "cpu_count": psutil.cpu_count(logical=True),
+            }
+            job_manager.heartbeat(WORKER_ID, stats=stats)
         except Exception as e:
             log.debug(f"Heartbeat error: {e}")
-        time.sleep(config.HEARTBEAT_INTERVAL)
 
 
 def process_job(job: dict):
@@ -89,6 +97,11 @@ def process_job(job: dict):
                 f"NAS source not accessible on this machine: {input_file}\n"
                 f"Assign NAS jobs only to workers that have the source volume mounted."
             )
+        if os.path.exists(output_path):
+            log.warning(f"  Output already exists, skipping encode: {output_path}")
+            job_manager.complete_job(job_id, output_path)
+            log.info(f"✓ Job {job_id} skipped (output exists) → {output_path}")
+            return
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         log.info(f"  NAS mode: {input_file} → {output_path}")
         encoder.encode(input_file, output_path, preset, custom_args, on_progress)

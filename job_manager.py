@@ -210,7 +210,9 @@ def register_worker(worker_id: str, hostname: str, capabilities: dict):
         _write(sftp, f"{config.SFTP_BASE_PATH}/workers/{worker_id}.json", info)
 
 
-def heartbeat(worker_id: str, current_job: Optional[str] = None):
+_UNSET = object()
+
+def heartbeat(worker_id: str, current_job=_UNSET, stats: Optional[dict] = None):
     with sftp_connection() as sftp:
         path = f"{config.SFTP_BASE_PATH}/workers/{worker_id}.json"
         try:
@@ -218,7 +220,10 @@ def heartbeat(worker_id: str, current_job: Optional[str] = None):
         except Exception:
             info = {"id": worker_id}
         info["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
-        info["current_job"] = current_job
+        if current_job is not _UNSET:
+            info["current_job"] = current_job
+        if stats:
+            info.update(stats)
         _write(sftp, path, info)
 
 
