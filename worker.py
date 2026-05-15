@@ -22,6 +22,7 @@ import psutil
 import config
 import job_manager
 import encoder
+import sysinfo
 from sftp_manager import sftp_connection
 
 logging.basicConfig(
@@ -134,6 +135,8 @@ def process_job(job: dict):
 
 def main():
     log.info(f"Worker {WORKER_ID} starting on {HOSTNAME}")
+    sysinfo.start()
+    log.info(f"Sysinfo server on :{sysinfo.PORT}")
 
     job_manager.ensure_dirs()
     job_manager.register_worker(
